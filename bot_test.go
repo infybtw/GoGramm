@@ -392,6 +392,78 @@ func TestContextReplyToCallbackQuery(t *testing.T) {
 	}
 }
 
+func TestContextEditMessageText(t *testing.T) {
+	var got struct {
+		ChatID    int64  `json:"chat_id"`
+		MessageID int64  `json:"message_id"`
+		Text      string `json:"text"`
+		ParseMode string `json:"parse_mode"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTESTTOKEN/editMessageText" {
+			t.Errorf("request path = %q, want editMessageText", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newTestBot(t, srv)
+	c := &Context{Api: b.Api, Update: &api.Update{CallbackQuery: &api.CallbackQuery{
+		Message: &api.Message{MessageID: 7, Chat: api.Chat{ID: 42}},
+	}}}
+	parseMode := "HTML"
+	if err := c.EditMessageText("Hello", &api.EditMessageTextParams{
+		ChatID:    new(api.NewChatID(99)),
+		MessageID: new(int64(8)),
+		ParseMode: &parseMode,
+	}); err != nil {
+		t.Fatalf("EditMessageText: %v", err)
+	}
+	if got.ChatID != 42 || got.MessageID != 7 || got.Text != "Hello" || got.ParseMode != "HTML" {
+		t.Errorf("editMessageText params = %+v", got)
+	}
+}
+
+func TestContextEditMessageImage(t *testing.T) {
+	var got struct {
+		ChatID    int64 `json:"chat_id"`
+		MessageID int64 `json:"message_id"`
+		Media     struct {
+			Type  string `json:"type"`
+			Media string `json:"media"`
+		} `json:"media"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTESTTOKEN/editMessageMedia" {
+			t.Errorf("request path = %q, want editMessageMedia", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newTestBot(t, srv)
+	c := &Context{Api: b.Api, Update: &api.Update{Message: &api.Message{MessageID: 7, Chat: api.Chat{ID: 42}}}}
+	if err := c.EditMessageImage(api.FileID("photo-id")); err != nil {
+		t.Fatalf("EditMessageImage: %v", err)
+	}
+	if got.ChatID != 42 || got.MessageID != 7 || got.Media.Type != "photo" || got.Media.Media != "photo-id" {
+		t.Errorf("editMessageMedia params = %+v", got)
+	}
+}
+
+func TestContextEditMessageWithoutTarget(t *testing.T) {
+	c := &Context{Update: &api.Update{}}
+	if err := c.EditMessageText("Hello"); !errors.Is(err, ErrNoEditMessage) {
+		t.Errorf("EditMessageText error = %v, want ErrNoEditMessage", err)
+	}
+}
+
 // testServer answers getUpdates with successive replies; bodies of every
 // request are appended to the returned slice.
 func testServer(t *testing.T, replies ...string) (*httptest.Server, func() []string) {

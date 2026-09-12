@@ -70,6 +70,10 @@ type Context struct {
 // ErrNoReplyChat is returned by Reply when the update has no source message.
 var ErrNoReplyChat = errors.New("gogram: update has no source message")
 
+// ErrNoEditMessage is returned by edit helpers when the update has no message
+// that can be edited.
+var ErrNoEditMessage = errors.New("gogram: update has no editable message")
+
 // Reply sends text to the chat containing the incoming message or callback.
 // An optional SendMessageParams supplies send options such as ReplyMarkup;
 // its ChatID and Text fields are ignored. It does not create a Telegram
@@ -107,6 +111,121 @@ func (c *Context) Reply(text string, options ...*api.SendMessageParams) error {
 	p.ChatID = api.NewChatID(chatID)
 	p.Text = text
 	_, err := c.Api.SendMessage(context.Background(), p)
+	return err
+}
+
+type editMessageTarget struct {
+	chatID               *api.ChatID
+	messageID            *int64
+	inlineMessageID      *string
+	businessConnectionID *string
+}
+
+func (c *Context) editMessageTarget() (*editMessageTarget, error) {
+	if c == nil || c.Update == nil {
+		return nil, ErrNoEditMessage
+	}
+	if query := c.Update.CallbackQuery; query != nil {
+		if message, ok := query.Message.(*api.Message); ok && message != nil {
+			chatID := api.NewChatID(message.Chat.ID)
+			return &editMessageTarget{
+				chatID:               &chatID,
+				messageID:            &message.MessageID,
+				businessConnectionID: message.BusinessConnectionID,
+			}, nil
+		}
+		if message, ok := query.Message.(*api.InaccessibleMessage); ok && message != nil {
+			chatID := api.NewChatID(message.Chat.ID)
+			return &editMessageTarget{chatID: &chatID, messageID: &message.MessageID}, nil
+		}
+		if query.InlineMessageID != nil {
+			return &editMessageTarget{inlineMessageID: query.InlineMessageID}, nil
+		}
+	}
+	if message := c.Update.Message; message != nil {
+		chatID := api.NewChatID(message.Chat.ID)
+		return &editMessageTarget{
+			chatID:               &chatID,
+			messageID:            &message.MessageID,
+			businessConnectionID: message.BusinessConnectionID,
+		}, nil
+	}
+	return nil, ErrNoEditMessage
+}
+
+// EditMessageText edits the text of the message associated with the update.
+// Optional parameters supply edit options; target fields are ignored.
+func (c *Context) EditMessageText(text string, options ...*api.EditMessageTextParams) error {
+	target, err := c.editMessageTarget()
+	if err != nil {
+		return err
+	}
+	p := &api.EditMessageTextParams{}
+	if len(options) > 0 && options[0] != nil {
+		*p = *options[0]
+	}
+	p.ChatID, p.MessageID, p.InlineMessageID = target.chatID, target.messageID, target.inlineMessageID
+	p.BusinessConnectionID = target.businessConnectionID
+	p.Text = &text
+	_, err = c.Api.EditMessageText(context.Background(), p)
+	return err
+}
+
+// EditMessageCaption edits the caption of the message associated with the update.
+// Optional parameters supply edit options; target fields are ignored.
+func (c *Context) EditMessageCaption(caption string, options ...*api.EditMessageCaptionParams) error {
+	target, err := c.editMessageTarget()
+	if err != nil {
+		return err
+	}
+	p := &api.EditMessageCaptionParams{}
+	if len(options) > 0 && options[0] != nil {
+		*p = *options[0]
+	}
+	p.ChatID, p.MessageID, p.InlineMessageID = target.chatID, target.messageID, target.inlineMessageID
+	p.BusinessConnectionID = target.businessConnectionID
+	p.Caption = &caption
+	_, err = c.Api.EditMessageCaption(context.Background(), p)
+	return err
+}
+
+// EditMessageMedia replaces the media of the message associated with the update.
+// Optional parameters supply edit options; target fields and Media are ignored.
+func (c *Context) EditMessageMedia(media api.InputMedia, options ...*api.EditMessageMediaParams) error {
+	target, err := c.editMessageTarget()
+	if err != nil {
+		return err
+	}
+	p := &api.EditMessageMediaParams{}
+	if len(options) > 0 && options[0] != nil {
+		*p = *options[0]
+	}
+	p.ChatID, p.MessageID, p.InlineMessageID = target.chatID, target.messageID, target.inlineMessageID
+	p.BusinessConnectionID, p.Media = target.businessConnectionID, media
+	_, err = c.Api.EditMessageMedia(context.Background(), p)
+	return err
+}
+
+// EditMessageImage replaces the message media with a photo. Optional parameters
+// supply photo and edit options; target fields and Media are ignored.
+func (c *Context) EditMessageImage(image api.InputFile, options ...*api.EditMessageMediaParams) error {
+	return c.EditMessageMedia(&api.InputMediaPhoto{Media: image}, options...)
+}
+
+// EditMessageReplyMarkup replaces the inline keyboard of the message associated
+// with the update. Optional parameters supply edit options; target fields are ignored.
+func (c *Context) EditMessageReplyMarkup(replyMarkup api.ReplyMarkup, options ...*api.EditMessageReplyMarkupParams) error {
+	target, err := c.editMessageTarget()
+	if err != nil {
+		return err
+	}
+	p := &api.EditMessageReplyMarkupParams{}
+	if len(options) > 0 && options[0] != nil {
+		*p = *options[0]
+	}
+	p.ChatID, p.MessageID, p.InlineMessageID = target.chatID, target.messageID, target.inlineMessageID
+	p.BusinessConnectionID, p.ReplyMarkup = target.businessConnectionID, replyMarkup
+	_, err = c.Api.EditMessageReplyMarkup(context.Background(), p)
 	return err
 }
 
