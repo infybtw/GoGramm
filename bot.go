@@ -18,6 +18,9 @@ import (
 // alias, so a client built with api.New plugs in directly.
 type Api = api.Client
 
+// Update is the complete update received from Telegram.
+type Update = api.Update
+
 // Handler handles a single update. A returned error propagates to Bot.Start,
 // which stops polling and returns it unchanged.
 type Handler func(*Context) error
@@ -61,7 +64,7 @@ const (
 type Context struct {
 	Bot    *Bot
 	Api    *Api
-	Update *api.Update
+	Update *Update
 }
 
 // Bot is a Telegram bot: handler registries plus a low-level API client.
