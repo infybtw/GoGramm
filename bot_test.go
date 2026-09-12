@@ -324,6 +324,74 @@ func textUpdate(s string) *api.Update {
 	return &api.Update{UpdateID: 1, Message: &api.Message{Text: &s}}
 }
 
+func TestContextReply(t *testing.T) {
+	var got struct {
+		ChatID      int64           `json:"chat_id"`
+		Text        string          `json:"text"`
+		ReplyMarkup json.RawMessage `json:"reply_markup"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTESTTOKEN/sendMessage" {
+			t.Errorf("request path = %q, want sendMessage", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":2,"date":1,"chat":{"id":42,"type":"private"}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newTestBot(t, srv)
+	c := &Context{Api: b.Api, Update: &api.Update{Message: &api.Message{Chat: api.Chat{ID: 42}}}}
+	keyboard := InlineKeyboard([]api.InlineKeyboardButton{InlineButton("Choose", "choice")})
+	if _, err := c.Reply("Hello", &api.SendMessageParams{
+		ChatID:      api.NewChatID(99),
+		Text:        "ignored",
+		ReplyMarkup: keyboard,
+	}); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
+	if got.ChatID != 42 || got.Text != "Hello" {
+		t.Errorf("sendMessage params = %+v, want chat_id=42 text=Hello", got)
+	}
+	if string(got.ReplyMarkup) != `{"inline_keyboard":[[{"text":"Choose","callback_data":"choice"}]]}` {
+		t.Errorf("reply_markup = %s, want inline keyboard", got.ReplyMarkup)
+	}
+}
+
+func TestContextReplyWithoutMessage(t *testing.T) {
+	c := &Context{Update: &api.Update{}}
+	if _, err := c.Reply("Hello"); !errors.Is(err, ErrNoReplyChat) {
+		t.Errorf("Reply error = %v, want ErrNoReplyChat", err)
+	}
+}
+
+func TestContextReplyToCallbackQuery(t *testing.T) {
+	var gotChatID int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p struct {
+			ChatID int64 `json:"chat_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		gotChatID = p.ChatID
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":2,"date":1,"chat":{"id":17,"type":"private"}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newTestBot(t, srv)
+	c := &Context{Api: b.Api, Update: &api.Update{CallbackQuery: &api.CallbackQuery{
+		Message: &api.Message{Chat: api.Chat{ID: 17}},
+	}}}
+	if _, err := c.Reply("Hello"); err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
+	if gotChatID != 17 {
+		t.Errorf("chat_id = %d, want 17", gotChatID)
+	}
+}
+
 // testServer answers getUpdates with successive replies; bodies of every
 // request are appended to the returned slice.
 func testServer(t *testing.T, replies ...string) (*httptest.Server, func() []string) {

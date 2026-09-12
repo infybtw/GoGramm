@@ -42,10 +42,7 @@ func main() {
 	bot := gogram.NewBot(os.Getenv("TELEGRAM_BOT_TOKEN"))
 
 	bot.Command("start", func(update *gogram.Context) error {
-		_, err := update.Api.SendMessage(context.Background(), &api.SendMessageParams{
-			ChatID: api.NewChatID(update.Update.Message.Chat.ID),
-			Text:   "Hello! Send me a message.",
-		})
+		_, err := update.Reply("Hello! Send me a message.")
 		return err
 	})
 
@@ -54,10 +51,7 @@ func main() {
 		if message.Text == nil {
 			return nil
 		}
-		_, err := update.Api.SendMessage(context.Background(), &api.SendMessageParams{
-			ChatID: api.NewChatID(message.Chat.ID),
-			Text:   *message.Text,
-		})
+		_, err := update.Reply(*message.Text)
 		return err
 	})
 
@@ -71,6 +65,18 @@ func main() {
 handler returns an error. It dispatches updates in order. Register a command
 without its leading slash; a command handler takes precedence over `OnMessage`.
 Remove a configured Telegram webhook before using long polling.
+
+`Context.Reply` accepts optional `api.SendMessageParams` for send options. Its
+`ChatID` and `Text` are always taken from the incoming message and first
+argument:
+
+```go
+_, err := update.Reply("Choose an option", &api.SendMessageParams{
+	ReplyMarkup: gogram.InlineKeyboard([]api.InlineKeyboardButton{
+		gogram.InlineButton("Choose", "choice:one"),
+	}),
+})
+```
 
 ## Low-Level API
 
