@@ -42,8 +42,7 @@ func main() {
 	bot := gogram.NewBot(os.Getenv("TELEGRAM_BOT_TOKEN"))
 
 	bot.Command("start", func(update *gogram.Context) error {
-		_, err := update.Reply("Hello! Send me a message.")
-		return err
+		return update.Reply("Hello! Send me a message.")
 	})
 
 	bot.OnMessage(func(update *gogram.Context) error {
@@ -51,8 +50,7 @@ func main() {
 		if message.Text == nil {
 			return nil
 		}
-		_, err := update.Reply(*message.Text)
-		return err
+		return update.Reply(*message.Text)
 	})
 
 	if err := bot.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -71,7 +69,7 @@ Remove a configured Telegram webhook before using long polling.
 argument:
 
 ```go
-_, err := update.Reply("Choose an option", &api.SendMessageParams{
+err := update.Reply("Choose an option", &api.SendMessageParams{
 	ReplyMarkup: gogram.InlineKeyboard([]api.InlineKeyboardButton{
 		gogram.InlineButton("Choose", "choice:one"),
 	}),

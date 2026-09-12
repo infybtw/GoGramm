@@ -344,7 +344,7 @@ func TestContextReply(t *testing.T) {
 	b := newTestBot(t, srv)
 	c := &Context{Api: b.Api, Update: &api.Update{Message: &api.Message{Chat: api.Chat{ID: 42}}}}
 	keyboard := InlineKeyboard([]api.InlineKeyboardButton{InlineButton("Choose", "choice")})
-	if _, err := c.Reply("Hello", &api.SendMessageParams{
+	if err := c.Reply("Hello", &api.SendMessageParams{
 		ChatID:      api.NewChatID(99),
 		Text:        "ignored",
 		ReplyMarkup: keyboard,
@@ -361,7 +361,7 @@ func TestContextReply(t *testing.T) {
 
 func TestContextReplyWithoutMessage(t *testing.T) {
 	c := &Context{Update: &api.Update{}}
-	if _, err := c.Reply("Hello"); !errors.Is(err, ErrNoReplyChat) {
+	if err := c.Reply("Hello"); !errors.Is(err, ErrNoReplyChat) {
 		t.Errorf("Reply error = %v, want ErrNoReplyChat", err)
 	}
 }
@@ -384,7 +384,7 @@ func TestContextReplyToCallbackQuery(t *testing.T) {
 	c := &Context{Api: b.Api, Update: &api.Update{CallbackQuery: &api.CallbackQuery{
 		Message: &api.Message{Chat: api.Chat{ID: 17}},
 	}}}
-	if _, err := c.Reply("Hello"); err != nil {
+	if err := c.Reply("Hello"); err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
 	if gotChatID != 17 {

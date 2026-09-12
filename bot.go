@@ -74,9 +74,9 @@ var ErrNoReplyChat = errors.New("gogram: update has no source message")
 // An optional SendMessageParams supplies send options such as ReplyMarkup;
 // its ChatID and Text fields are ignored. It does not create a Telegram
 // message reply; set ReplyParameters in the options when that is required.
-func (c *Context) Reply(text string, options ...*api.SendMessageParams) (*api.Message, error) {
+func (c *Context) Reply(text string, options ...*api.SendMessageParams) error {
 	if c == nil || c.Update == nil {
-		return nil, ErrNoReplyChat
+		return ErrNoReplyChat
 	}
 	var chatID int64
 	switch {
@@ -86,19 +86,19 @@ func (c *Context) Reply(text string, options ...*api.SendMessageParams) (*api.Me
 		switch message := c.Update.CallbackQuery.Message.(type) {
 		case *api.Message:
 			if message == nil {
-				return nil, ErrNoReplyChat
+				return ErrNoReplyChat
 			}
 			chatID = message.Chat.ID
 		case *api.InaccessibleMessage:
 			if message == nil {
-				return nil, ErrNoReplyChat
+				return ErrNoReplyChat
 			}
 			chatID = message.Chat.ID
 		default:
-			return nil, ErrNoReplyChat
+			return ErrNoReplyChat
 		}
 	default:
-		return nil, ErrNoReplyChat
+		return ErrNoReplyChat
 	}
 	p := &api.SendMessageParams{}
 	if len(options) > 0 && options[0] != nil {
@@ -106,7 +106,8 @@ func (c *Context) Reply(text string, options ...*api.SendMessageParams) (*api.Me
 	}
 	p.ChatID = api.NewChatID(chatID)
 	p.Text = text
-	return c.Api.SendMessage(context.Background(), p)
+	_, err := c.Api.SendMessage(context.Background(), p)
+	return err
 }
 
 // Bot is a Telegram bot: handler registries plus a low-level API client.
