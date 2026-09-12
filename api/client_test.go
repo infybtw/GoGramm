@@ -114,8 +114,9 @@ func TestSendPhotoUpload(t *testing.T) {
 	c, cap := newTestClient(t, `{"ok":true,"result":{"message_id":778,"date":1700000000,"chat":{"id":1,"type":"private"}}}`)
 
 	p := &SendPhotoParams{
-		ChatID: NewChatID(1),
-		Photo:  FileUpload("cat.png", strings.NewReader("fakepng")),
+		ChatID:  NewChatID(1),
+		Photo:   FileUpload("cat.png", strings.NewReader("fakepng")),
+		Caption: ptr("a cat"),
 	}
 	m, err := c.SendPhoto(context.Background(), p)
 	if err != nil {
@@ -132,8 +133,11 @@ func TestSendPhotoUpload(t *testing.T) {
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		t.Fatalf("parse multipart: %v", err)
 	}
-	if got := r.FormValue("photo"); got != `"attach://0"` {
-		t.Errorf("photo field = %q, want JSON-encoded \"attach://0\"", got)
+	if got := r.FormValue("photo"); got != "attach://0" {
+		t.Errorf("photo field = %q, want attach://0", got)
+	}
+	if got := r.FormValue("caption"); got != "a cat" {
+		t.Errorf("caption field = %q, want a cat", got)
 	}
 	file, header, err := r.FormFile("0")
 	if err != nil {
@@ -144,6 +148,8 @@ func TestSendPhotoUpload(t *testing.T) {
 		t.Errorf("filename = %q, want cat.png", header.Filename)
 	}
 }
+
+func ptr[T any](v T) *T { return &v }
 
 func TestSendMediaGroupNestedUpload(t *testing.T) {
 	c, cap := newTestClient(t, `{"ok":true,"result":[{"message_id":1,"date":1700000000,"chat":{"id":1,"type":"private"}}]}`)

@@ -300,9 +300,9 @@ func walkForUploads(v reflect.Value, uploads *[]*upload) {
 }
 
 // multipartBody encodes params as multipart/form-data: one form field per
-// exported top-level params field (name = json tag, value = the field's
-// JSON encoding, honoring omitempty), plus one file part per upload (field
-// name = part name, filename = upload name).
+// exported top-level params field (name = json tag, scalar values in their
+// native form and objects/arrays as JSON, honoring omitempty), plus one file
+// part per upload (field name = part name, filename = upload name).
 func multipartBody(params any, uploads []*upload) (io.Reader, string, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
@@ -326,11 +326,11 @@ func multipartBody(params any, uploads []*upload) (io.Reader, string, error) {
 			if hasOmitEmpty(sf) && isEmptyValue(fv) {
 				continue
 			}
-			b, err := json.Marshal(fv.Interface())
+			value, err := multipartFieldValue(fv.Interface())
 			if err != nil {
 				return nil, "", err
 			}
-			if err := w.WriteField(name, string(b)); err != nil {
+			if err := w.WriteField(name, value); err != nil {
 				return nil, "", err
 			}
 		}
@@ -349,6 +349,21 @@ func multipartBody(params any, uploads []*upload) (io.Reader, string, error) {
 		return nil, "", err
 	}
 	return &buf, w.FormDataContentType(), nil
+}
+
+func multipartFieldValue(value any) (string, error) {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 0 && b[0] == '"' {
+		var text string
+		if err := json.Unmarshal(b, &text); err != nil {
+			return "", err
+		}
+		return text, nil
+	}
+	return string(b), nil
 }
 
 // jsonFieldName returns the wire name for a struct field per its json tag.

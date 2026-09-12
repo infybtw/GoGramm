@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -180,6 +181,49 @@ type OwnedGifts struct {
 	TotalCount int         `json:"total_count"`
 	Gifts      []OwnedGift `json:"gifts"`
 	NextOffset *string     `json:"next_offset"`
+}
+
+func (o *OwnedGifts) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		TotalCount int               `json:"total_count"`
+		Gifts      []json.RawMessage `json:"gifts"`
+		NextOffset *string           `json:"next_offset"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	gifts := make([]OwnedGift, len(raw.Gifts))
+	for i := range raw.Gifts {
+		gift, err := decodeOwnedGift(raw.Gifts[i])
+		if err != nil {
+			return err
+		}
+		gifts[i] = gift
+	}
+	o.TotalCount, o.Gifts, o.NextOffset = raw.TotalCount, gifts, raw.NextOffset
+	return nil
+}
+
+func decodeOwnedGift(data []byte) (OwnedGift, error) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	var gift OwnedGift
+	switch probe.Type {
+	case "regular":
+		gift = &OwnedGiftRegular{}
+	case "unique":
+		gift = &OwnedGiftUnique{}
+	default:
+		return nil, fmt.Errorf("telegram: unknown OwnedGift type %q", probe.Type)
+	}
+	if err := json.Unmarshal(data, gift); err != nil {
+		return nil, err
+	}
+	return gift, nil
 }
 
 // BotAccessSettings describes the access settings of a bot.
@@ -409,7 +453,7 @@ func (v BotCommandScopeAllChatAdministrators) MarshalJSON() ([]byte, error) {
 // BotCommandScopeChat represents the scope of bot commands, covering a
 // specific chat.
 type BotCommandScopeChat struct {
-	ChatID int64 `json:"chat_id"`
+	ChatID ChatID `json:"chat_id"`
 }
 
 func (*BotCommandScopeChat) botCommandScope() {}
@@ -425,7 +469,7 @@ func (v BotCommandScopeChat) MarshalJSON() ([]byte, error) {
 // BotCommandScopeChatAdministrators represents the scope of bot commands,
 // covering all administrators of a specific group or supergroup chat.
 type BotCommandScopeChatAdministrators struct {
-	ChatID int64 `json:"chat_id"`
+	ChatID ChatID `json:"chat_id"`
 }
 
 func (*BotCommandScopeChatAdministrators) botCommandScope() {}
@@ -441,8 +485,8 @@ func (v BotCommandScopeChatAdministrators) MarshalJSON() ([]byte, error) {
 // BotCommandScopeChatMember represents the scope of bot commands, covering a
 // specific member of a group or supergroup chat.
 type BotCommandScopeChatMember struct {
-	ChatID int64 `json:"chat_id"`
-	UserID int64 `json:"user_id"`
+	ChatID ChatID `json:"chat_id"`
+	UserID int64  `json:"user_id"`
 }
 
 func (*BotCommandScopeChatMember) botCommandScope() {}
@@ -1938,6 +1982,31 @@ type TransactionPartnerUser struct {
 	PremiumSubscriptionDuration *int           `json:"premium_subscription_duration"`
 }
 
+func (p *TransactionPartnerUser) UnmarshalJSON(data []byte) error {
+	type alias TransactionPartnerUser
+	var raw struct {
+		PaidMedia []json.RawMessage `json:"paid_media"`
+		*alias
+	}
+	raw.alias = (*alias)(p)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.PaidMedia == nil {
+		return nil
+	}
+	media := make([]PaidMedia, len(raw.PaidMedia))
+	for i := range raw.PaidMedia {
+		v, err := decodePaidMedia(raw.PaidMedia[i])
+		if err != nil {
+			return err
+		}
+		media[i] = v
+	}
+	p.PaidMedia = &media
+	return nil
+}
+
 func (*TransactionPartnerUser) transactionPartner() {}
 
 func (v TransactionPartnerUser) MarshalJSON() ([]byte, error) {
@@ -1984,6 +2053,21 @@ func (v TransactionPartnerAffiliateProgram) MarshalJSON() ([]byte, error) {
 // TransactionPartnerFragment describes a withdrawal transaction with Fragment.
 type TransactionPartnerFragment struct {
 	WithdrawalState RevenueWithdrawalState `json:"withdrawal_state"`
+}
+
+func (p *TransactionPartnerFragment) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		WithdrawalState json.RawMessage `json:"withdrawal_state"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	state, err := decodeRevenueWithdrawalState(raw.WithdrawalState)
+	if err != nil {
+		return err
+	}
+	p.WithdrawalState = state
+	return nil
 }
 
 func (*TransactionPartnerFragment) transactionPartner() {}
@@ -2045,6 +2129,88 @@ type StarTransaction struct {
 	Date           int64              `json:"date"`
 	Source         TransactionPartner `json:"source"`
 	Receiver       TransactionPartner `json:"receiver"`
+}
+
+func (s *StarTransaction) UnmarshalJSON(data []byte) error {
+	type alias StarTransaction
+	var raw struct {
+		Source   json.RawMessage `json:"source"`
+		Receiver json.RawMessage `json:"receiver"`
+		*alias
+	}
+	raw.alias = (*alias)(s)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	source, err := decodeTransactionPartner(raw.Source)
+	if err != nil {
+		return err
+	}
+	receiver, err := decodeTransactionPartner(raw.Receiver)
+	if err != nil {
+		return err
+	}
+	s.Source, s.Receiver = source, receiver
+	return nil
+}
+
+func decodeRevenueWithdrawalState(data []byte) (RevenueWithdrawalState, error) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	var state RevenueWithdrawalState
+	switch probe.Type {
+	case "pending":
+		state = &RevenueWithdrawalStatePending{}
+	case "succeeded":
+		state = &RevenueWithdrawalStateSucceeded{}
+	case "failed":
+		state = &RevenueWithdrawalStateFailed{}
+	default:
+		return nil, fmt.Errorf("telegram: unknown RevenueWithdrawalState type %q", probe.Type)
+	}
+	if err := json.Unmarshal(data, state); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func decodeTransactionPartner(data []byte) (TransactionPartner, error) {
+	if len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil, nil
+	}
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	var partner TransactionPartner
+	switch probe.Type {
+	case "user":
+		partner = &TransactionPartnerUser{}
+	case "chat":
+		partner = &TransactionPartnerChat{}
+	case "affiliate_program":
+		partner = &TransactionPartnerAffiliateProgram{}
+	case "fragment":
+		partner = &TransactionPartnerFragment{}
+	case "telegram_ads":
+		partner = &TransactionPartnerTelegramAds{}
+	case "telegram_api":
+		partner = &TransactionPartnerTelegramApi{}
+	case "other":
+		partner = &TransactionPartnerOther{}
+	default:
+		return nil, fmt.Errorf("telegram: unknown TransactionPartner type %q", probe.Type)
+	}
+	if err := json.Unmarshal(data, partner); err != nil {
+		return nil, err
+	}
+	return partner, nil
 }
 
 // StarTransactions contains a list of Telegram Star transactions.

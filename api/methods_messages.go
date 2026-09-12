@@ -9,7 +9,7 @@ import (
 
 // GetUpdatesParams holds the parameters for the getUpdates method.
 type GetUpdatesParams struct {
-	Offset         *int     `json:"offset,omitempty"`
+	Offset         *int64   `json:"offset,omitempty"`
 	Limit          *int     `json:"limit,omitempty"`
 	Timeout        *int     `json:"timeout,omitempty"`
 	AllowedUpdates []string `json:"allowed_updates,omitempty"`

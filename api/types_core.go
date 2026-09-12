@@ -1385,6 +1385,26 @@ type PaidMediaInfo struct {
 	PaidMedia []PaidMedia `json:"paid_media"`
 }
 
+func (p *PaidMediaInfo) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		StarCount int64             `json:"star_count"`
+		PaidMedia []json.RawMessage `json:"paid_media"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	media := make([]PaidMedia, len(raw.PaidMedia))
+	for i := range raw.PaidMedia {
+		v, err := decodePaidMedia(raw.PaidMedia[i])
+		if err != nil {
+			return err
+		}
+		media[i] = v
+	}
+	p.StarCount, p.PaidMedia = raw.StarCount, media
+	return nil
+}
+
 // PaidMedia describes paid media. It can be one of PaidMediaPreview,
 // PaidMediaPhoto, PaidMediaVideo or PaidMediaLivePhoto.
 type PaidMedia interface {
@@ -1453,6 +1473,32 @@ func (*PaidMediaPreview) paidMedia()   {}
 func (*PaidMediaPhoto) paidMedia()     {}
 func (*PaidMediaVideo) paidMedia()     {}
 func (*PaidMediaLivePhoto) paidMedia() {}
+
+func decodePaidMedia(data []byte) (PaidMedia, error) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	var media PaidMedia
+	switch probe.Type {
+	case "preview":
+		media = &PaidMediaPreview{}
+	case "photo":
+		media = &PaidMediaPhoto{}
+	case "video":
+		media = &PaidMediaVideo{}
+	case "live_photo":
+		media = &PaidMediaLivePhoto{}
+	default:
+		return nil, fmt.Errorf("telegram: unknown PaidMedia type %q", probe.Type)
+	}
+	if err := json.Unmarshal(data, media); err != nil {
+		return nil, err
+	}
+	return media, nil
+}
 
 // Contact represents a phone contact.
 type Contact struct {
@@ -1734,6 +1780,26 @@ type CallbackQuery struct {
 	GameShortName   *string                  `json:"game_short_name"`
 }
 
+func (q *CallbackQuery) UnmarshalJSON(data []byte) error {
+	type alias CallbackQuery
+	var raw struct {
+		Message json.RawMessage `json:"message"`
+		*alias
+	}
+	raw.alias = (*alias)(q)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Message) > 0 {
+		message, err := decodeMaybeInaccessibleMessage(raw.Message)
+		if err != nil {
+			return err
+		}
+		q.Message = message
+	}
+	return nil
+}
+
 // ChatInviteLink represents an invite link for a chat.
 type ChatInviteLink struct {
 	InviteLink              string  `json:"invite_link"`
@@ -1781,6 +1847,29 @@ type ChatMemberUpdated struct {
 	InviteLink              *ChatInviteLink `json:"invite_link"`
 	ViaJoinRequest          *bool           `json:"via_join_request"`
 	ViaChatFolderInviteLink *bool           `json:"via_chat_folder_invite_link"`
+}
+
+func (c *ChatMemberUpdated) UnmarshalJSON(data []byte) error {
+	type alias ChatMemberUpdated
+	var raw struct {
+		OldChatMember json.RawMessage `json:"old_chat_member"`
+		NewChatMember json.RawMessage `json:"new_chat_member"`
+		*alias
+	}
+	raw.alias = (*alias)(c)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	oldMember, err := decodeChatMember(raw.OldChatMember)
+	if err != nil {
+		return err
+	}
+	newMember, err := decodeChatMember(raw.NewChatMember)
+	if err != nil {
+		return err
+	}
+	c.OldChatMember, c.NewChatMember = oldMember, newMember
+	return nil
 }
 
 // ChatMember contains information about one member of a chat.
@@ -2015,6 +2104,22 @@ type ReactionCount struct {
 	TotalCount int          `json:"total_count"`
 }
 
+func (r *ReactionCount) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Type       json.RawMessage `json:"type"`
+		TotalCount int             `json:"total_count"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	typ, err := decodeReactionType(raw.Type)
+	if err != nil {
+		return err
+	}
+	r.Type, r.TotalCount = typ, raw.TotalCount
+	return nil
+}
+
 // MessageReactionUpdated represents a change of a reaction on a message
 // performed by a user.
 type MessageReactionUpdated struct {
@@ -2027,6 +2132,29 @@ type MessageReactionUpdated struct {
 	NewReaction []ReactionType `json:"new_reaction"`
 }
 
+func (m *MessageReactionUpdated) UnmarshalJSON(data []byte) error {
+	type alias MessageReactionUpdated
+	var raw struct {
+		OldReaction []json.RawMessage `json:"old_reaction"`
+		NewReaction []json.RawMessage `json:"new_reaction"`
+		*alias
+	}
+	raw.alias = (*alias)(m)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	oldReaction, err := decodeReactionTypes(raw.OldReaction)
+	if err != nil {
+		return err
+	}
+	newReaction, err := decodeReactionTypes(raw.NewReaction)
+	if err != nil {
+		return err
+	}
+	m.OldReaction, m.NewReaction = oldReaction, newReaction
+	return nil
+}
+
 // MessageReactionCountUpdated represents reaction changes on a message with
 // anonymous reactions.
 type MessageReactionCountUpdated struct {
@@ -2034,6 +2162,42 @@ type MessageReactionCountUpdated struct {
 	MessageID int64           `json:"message_id"`
 	Date      int64           `json:"date"`
 	Reactions []ReactionCount `json:"reactions"`
+}
+
+func decodeReactionTypes(raw []json.RawMessage) ([]ReactionType, error) {
+	reactions := make([]ReactionType, len(raw))
+	for i := range raw {
+		reaction, err := decodeReactionType(raw[i])
+		if err != nil {
+			return nil, err
+		}
+		reactions[i] = reaction
+	}
+	return reactions, nil
+}
+
+func decodeReactionType(data []byte) (ReactionType, error) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	var reaction ReactionType
+	switch probe.Type {
+	case "emoji":
+		reaction = &ReactionTypeEmoji{}
+	case "custom_emoji":
+		reaction = &ReactionTypeCustomEmoji{}
+	case "paid":
+		reaction = &ReactionTypePaid{}
+	default:
+		return nil, fmt.Errorf("telegram: unknown ReactionType %q", probe.Type)
+	}
+	if err := json.Unmarshal(data, reaction); err != nil {
+		return nil, err
+	}
+	return reaction, nil
 }
 
 // ForumTopic represents a forum topic.
