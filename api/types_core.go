@@ -1627,7 +1627,7 @@ type ReplyMarkup interface {
 // to the message it belongs to.
 type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
-	ForceReply     *bool                    `json:"force_reply"`
+	ForceReply     *bool                    `json:"force_reply,omitempty"`
 }
 
 func (*InlineKeyboardMarkup) replyMarkup() {}
@@ -1637,19 +1637,19 @@ func (*InlineKeyboardMarkup) replyMarkup() {}
 // used to specify the type of the button.
 type InlineKeyboardButton struct {
 	Text                         string                       `json:"text"`
-	IconCustomEmojiID            *string                      `json:"icon_custom_emoji_id"`
-	Style                        *string                      `json:"style"`
-	URL                          *string                      `json:"url"`
-	CallbackData                 *string                      `json:"callback_data"`
-	WebApp                       *WebAppInfo                  `json:"web_app"`
-	LoginURL                     *LoginUrl                    `json:"login_url"`
-	SwitchInlineQuery            *string                      `json:"switch_inline_query"`
-	SwitchInlineQueryCurrentChat *string                      `json:"switch_inline_query_current_chat"`
-	SwitchInlineQueryChosenChat  *SwitchInlineQueryChosenChat `json:"switch_inline_query_chosen_chat"`
-	CopyText                     *CopyTextButton              `json:"copy_text"`
-	CallbackGame                 *CallbackGame                `json:"callback_game"`
-	Pay                          *bool                        `json:"pay"`
-	Disabled                     *DisabledButton              `json:"disabled"`
+	IconCustomEmojiID            *string                      `json:"icon_custom_emoji_id,omitempty"`
+	Style                        *string                      `json:"style,omitempty"`
+	URL                          *string                      `json:"url,omitempty"`
+	CallbackData                 *string                      `json:"callback_data,omitempty"`
+	WebApp                       *WebAppInfo                  `json:"web_app,omitempty"`
+	LoginURL                     *LoginUrl                    `json:"login_url,omitempty"`
+	SwitchInlineQuery            *string                      `json:"switch_inline_query,omitempty"`
+	SwitchInlineQueryCurrentChat *string                      `json:"switch_inline_query_current_chat,omitempty"`
+	SwitchInlineQueryChosenChat  *SwitchInlineQueryChosenChat `json:"switch_inline_query_chosen_chat,omitempty"`
+	CopyText                     *CopyTextButton              `json:"copy_text,omitempty"`
+	CallbackGame                 *CallbackGame                `json:"callback_game,omitempty"`
+	Pay                          *bool                        `json:"pay,omitempty"`
+	Disabled                     *DisabledButton              `json:"disabled,omitempty"`
 }
 
 // LoginUrl represents a parameter of the inline keyboard button used to
@@ -1684,12 +1684,12 @@ type DisabledButton struct{}
 // ReplyKeyboardMarkup represents a custom keyboard with reply options.
 type ReplyKeyboardMarkup struct {
 	Keyboard              [][]KeyboardButton `json:"keyboard"`
-	IsPersistent          *bool              `json:"is_persistent"`
-	ResizeKeyboard        *bool              `json:"resize_keyboard"`
-	OneTimeKeyboard       *bool              `json:"one_time_keyboard"`
-	InputFieldPlaceholder *string            `json:"input_field_placeholder"`
-	Selective             *bool              `json:"selective"`
-	ForceReply            *bool              `json:"force_reply"`
+	IsPersistent          *bool              `json:"is_persistent,omitempty"`
+	ResizeKeyboard        *bool              `json:"resize_keyboard,omitempty"`
+	OneTimeKeyboard       *bool              `json:"one_time_keyboard,omitempty"`
+	InputFieldPlaceholder *string            `json:"input_field_placeholder,omitempty"`
+	Selective             *bool              `json:"selective,omitempty"`
+	ForceReply            *bool              `json:"force_reply,omitempty"`
 }
 
 func (*ReplyKeyboardMarkup) replyMarkup() {}
@@ -1697,15 +1697,15 @@ func (*ReplyKeyboardMarkup) replyMarkup() {}
 // KeyboardButton represents one button of the reply keyboard.
 type KeyboardButton struct {
 	Text              string                           `json:"text"`
-	IconCustomEmojiID *string                          `json:"icon_custom_emoji_id"`
-	Style             *string                          `json:"style"`
-	RequestUsers      *KeyboardButtonRequestUsers      `json:"request_users"`
-	RequestChat       *KeyboardButtonRequestChat       `json:"request_chat"`
-	RequestManagedBot *KeyboardButtonRequestManagedBot `json:"request_managed_bot"`
-	RequestContact    *bool                            `json:"request_contact"`
-	RequestLocation   *bool                            `json:"request_location"`
-	RequestPoll       *KeyboardButtonPollType          `json:"request_poll"`
-	WebApp            *WebAppInfo                      `json:"web_app"`
+	IconCustomEmojiID *string                          `json:"icon_custom_emoji_id,omitempty"`
+	Style             *string                          `json:"style,omitempty"`
+	RequestUsers      *KeyboardButtonRequestUsers      `json:"request_users,omitempty"`
+	RequestChat       *KeyboardButtonRequestChat       `json:"request_chat,omitempty"`
+	RequestManagedBot *KeyboardButtonRequestManagedBot `json:"request_managed_bot,omitempty"`
+	RequestContact    *bool                            `json:"request_contact,omitempty"`
+	RequestLocation   *bool                            `json:"request_location,omitempty"`
+	RequestPoll       *KeyboardButtonPollType          `json:"request_poll,omitempty"`
+	WebApp            *WebAppInfo                      `json:"web_app,omitempty"`
 }
 
 // KeyboardButtonRequestUsers defines the criteria used to request suitable

@@ -88,6 +88,58 @@ _, err := client.SendMessage(context.Background(), &api.SendMessageParams{
 See the exported types and methods in [`api`](./api) for the supported Bot API
 surface.
 
+## Buttons
+
+Use the root package helpers for common inline and reply keyboards. The helpers
+return `api.ReplyMarkup` implementations, so they can be passed directly to
+`SendMessageParams.ReplyMarkup`.
+
+```go
+keyboard := gogram.InlineKeyboard(
+	[]api.InlineKeyboardButton{
+		gogram.InlineButton("Choose", "choice:one"),
+		gogram.InlineURLButton("Website", "https://example.com"),
+	},
+)
+_, err := bot.Api.SendMessage(ctx, &api.SendMessageParams{
+	ChatID:      api.NewChatID(123456789),
+	Text:        "Choose an option",
+	ReplyMarkup: keyboard,
+})
+
+bot.On(gogram.UpdateCallbackQuery, func(update *gogram.Context) error {
+	query := update.Update.CallbackQuery
+	if query.Data != nil {
+		log.Printf("choice: %s", *query.Data)
+	}
+	return update.Api.AnswerCallbackQuery(ctx, &api.AnswerCallbackQueryParams{
+		CallbackQueryID: query.ID,
+	})
+})
+```
+
+Always answer callback queries so Telegram stops showing the loading indicator.
+
+```go
+keyboard := gogram.ReplyKeyboard(gogram.ReplyKeyboardOptions{
+	ResizeKeyboard: true,
+}, []api.KeyboardButton{
+	gogram.ReplyButton("Yes"),
+	gogram.ReplyButton("No"),
+})
+_, err := bot.Api.SendMessage(ctx, &api.SendMessageParams{
+	ChatID:      api.NewChatID(123456789),
+	Text:        "Continue?",
+	ReplyMarkup: keyboard,
+})
+
+// Remove a reply keyboard with the existing API type.
+removeKeyboard := &api.ReplyKeyboardRemove{RemoveKeyboard: true}
+```
+
+For uncommon button actions, such as requesting a contact or location, create
+`api.InlineKeyboardButton` and `api.KeyboardButton` values directly.
+
 ## License
 
 [MIT](LICENSE)
