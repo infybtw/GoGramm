@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/infybtw/gogram/api"
+	"github.com/infybtw/GoGramm/api"
 )
 
 // Api is the low-level Bot API client the high-level layer runs on. It is an

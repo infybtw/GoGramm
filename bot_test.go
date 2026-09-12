@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/infybtw/gogram/api"
+	"github.com/infybtw/GoGramm/api"
 )
 
 // recorder records the contexts a handler was invoked with.
