@@ -75,10 +75,11 @@ type Bot struct {
 	// a client built with api.New and api.Options.
 	Api *Api
 
-	mu       sync.RWMutex
-	commands map[string]Handler
-	handlers map[UpdateType]Handler
-	username string
+	mu        sync.RWMutex
+	commands  map[string]Handler
+	callbacks map[string]Handler
+	handlers  map[UpdateType]Handler
+	username  string
 }
 
 // NewBot returns a Bot authenticating with token. Replace the exported Api
@@ -86,9 +87,10 @@ type Bot struct {
 // api.WithServerURL).
 func NewBot(token string) *Bot {
 	return &Bot{
-		Api:      api.New(token),
-		commands: make(map[string]Handler),
-		handlers: make(map[UpdateType]Handler),
+		Api:       api.New(token),
+		commands:  make(map[string]Handler),
+		callbacks: make(map[string]Handler),
+		handlers:  make(map[UpdateType]Handler),
 	}
 }
 
@@ -103,6 +105,20 @@ func (b *Bot) Command(name string, handler Handler) {
 		return
 	}
 	b.commands[name] = handler
+}
+
+// CallbackQuery registers handler for an inline button whose callback_data
+// exactly matches data. Registration replaces any previous handler for data;
+// a nil handler removes it. A matching handler takes precedence over the
+// general UpdateCallbackQuery handler registered with On.
+func (b *Bot) CallbackQuery(data string, handler Handler) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if handler == nil {
+		delete(b.callbacks, data)
+		return
+	}
+	b.callbacks[data] = handler
 }
 
 // On registers handler for updateType. Registration replaces any previous
@@ -214,6 +230,17 @@ func (b *Bot) commandHandler(msg *api.Message) Handler {
 	return b.commands[command]
 }
 
+// callbackHandler returns the handler registered for q's callback data, if
+// q carries data and the data has a registered handler.
+func (b *Bot) callbackHandler(q *api.CallbackQuery) Handler {
+	if q == nil || q.Data == nil {
+		return nil
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.callbacks[*q.Data]
+}
+
 // handlerFor selects the handler for u: for a message update, a registered
 // command handler wins over the message handler; a non-command message, a
 // command without a registered handler, and all other update types use the
@@ -221,6 +248,11 @@ func (b *Bot) commandHandler(msg *api.Message) Handler {
 func (b *Bot) handlerFor(u *api.Update, typ UpdateType) Handler {
 	if typ == UpdateMessage {
 		if h := b.commandHandler(u.Message); h != nil {
+			return h
+		}
+	}
+	if typ == UpdateCallbackQuery {
+		if h := b.callbackHandler(u.CallbackQuery); h != nil {
 			return h
 		}
 	}

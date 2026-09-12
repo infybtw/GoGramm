@@ -107,11 +107,9 @@ _, err := bot.Api.SendMessage(ctx, &api.SendMessageParams{
 	ReplyMarkup: keyboard,
 })
 
-bot.On(gogram.UpdateCallbackQuery, func(update *gogram.Context) error {
+bot.CallbackQuery("choice:one", func(update *gogram.Context) error {
 	query := update.Update.CallbackQuery
-	if query.Data != nil {
-		log.Printf("choice: %s", *query.Data)
-	}
+	log.Printf("choice: %s", *query.Data)
 	return update.Api.AnswerCallbackQuery(ctx, &api.AnswerCallbackQueryParams{
 		CallbackQueryID: query.ID,
 	})
@@ -119,6 +117,8 @@ bot.On(gogram.UpdateCallbackQuery, func(update *gogram.Context) error {
 ```
 
 Always answer callback queries so Telegram stops showing the loading indicator.
+`Bot.CallbackQuery` matches `callback_data` exactly; use
+`Bot.On(gogram.UpdateCallbackQuery, handler)` to handle every callback query.
 
 ```go
 keyboard := gogram.ReplyKeyboard(gogram.ReplyKeyboardOptions{

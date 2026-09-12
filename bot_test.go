@@ -200,6 +200,43 @@ func TestCommandRouting(t *testing.T) {
 	}
 }
 
+func TestCallbackQueryRouting(t *testing.T) {
+	callbackUpdate := func(data *string) *api.Update {
+		return &api.Update{UpdateID: 1, CallbackQuery: &api.CallbackQuery{Data: data}}
+	}
+	data := "choice:one"
+	otherData := "choice:two"
+
+	tests := []struct {
+		name         string
+		update       *api.Update
+		wantCallback int
+		wantGeneral  int
+	}{
+		{"matching data", callbackUpdate(&data), 1, 0},
+		{"unmatched data", callbackUpdate(&otherData), 0, 1},
+		{"no data", callbackUpdate(nil), 0, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBot("TESTTOKEN")
+			callback, general := &recorder{}, &recorder{}
+			b.CallbackQuery(data, callback.handle)
+			b.On(UpdateCallbackQuery, general.handle)
+
+			if err := b.dispatch(tt.update); err != nil {
+				t.Fatalf("dispatch: %v", err)
+			}
+			if callback.count() != tt.wantCallback {
+				t.Errorf("callback handler called %d times, want %d", callback.count(), tt.wantCallback)
+			}
+			if general.count() != tt.wantGeneral {
+				t.Errorf("general handler called %d times, want %d", general.count(), tt.wantGeneral)
+			}
+		})
+	}
+}
+
 func TestRegistrationReplacesAndDeletes(t *testing.T) {
 	t.Run("command replace", func(t *testing.T) {
 		b := NewBot("TESTTOKEN")
@@ -225,6 +262,28 @@ func TestRegistrationReplacesAndDeletes(t *testing.T) {
 		}
 		if cmd.count() != 0 || msg.count() != 1 {
 			t.Errorf("command = %d, message = %d calls, want 0 and 1", cmd.count(), msg.count())
+		}
+	})
+	t.Run("callback replace and delete falls back to general handler", func(t *testing.T) {
+		b := NewBot("TESTTOKEN")
+		first, second, general := &recorder{}, &recorder{}, &recorder{}
+		data := "choice:one"
+		b.CallbackQuery(data, first.handle)
+		b.CallbackQuery(data, second.handle)
+		b.On(UpdateCallbackQuery, general.handle)
+		u := &api.Update{UpdateID: 1, CallbackQuery: &api.CallbackQuery{Data: &data}}
+		if err := b.dispatch(u); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if first.count() != 0 || second.count() != 1 || general.count() != 0 {
+			t.Errorf("first, second, general = %d, %d, %d calls, want 0, 1, 0", first.count(), second.count(), general.count())
+		}
+		b.CallbackQuery(data, nil)
+		if err := b.dispatch(u); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if second.count() != 1 || general.count() != 1 {
+			t.Errorf("second, general = %d, %d calls after delete, want 1, 1", second.count(), general.count())
 		}
 	})
 	t.Run("update type replace and delete", func(t *testing.T) {
