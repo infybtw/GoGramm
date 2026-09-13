@@ -40,6 +40,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -123,6 +124,39 @@ bot.Use(admin)
 `Composer` ignores non-command messages, unknown commands, and commands
 addressed to another bot. Registering the same command or callback again
 replaces its handler; passing `nil` removes it.
+
+## Sessions
+
+Sessions are server-side state held in memory by `Bot`. They are keyed by both
+the sender's user ID and chat ID, so different users in a group have separate
+sessions. Register a session handler and activate it from a command; active
+sessions receive subsequent messages without a registered command handler
+before `OnMessage`:
+
+```go
+bot.Session("StartMessage", func(update *gogram.Context) error {
+	defer update.EndSession()
+	id, ok := update.SessionData("id")
+	if !ok {
+		return update.Reply("Missing request ID.")
+	}
+	return update.Reply(fmt.Sprintf("Request %d: %s", id, *update.Update.Message.Text))
+})
+
+bot.Command("start", func(update *gogram.Context) error {
+	if err := update.StartSession("StartMessage", map[string]int{"id": 1}); err != nil {
+		return err
+	}
+	return update.Reply("Send one message.")
+})
+```
+
+`Context.SessionData(key)` reads values from session data maps with string
+keys, such as `map[string]int` and `map[string]any`. Use
+`Context.SessionEdit(data)` to replace an active session's data and
+`Context.EndSession` to end it. Registered commands still take precedence,
+allowing commands such as `/start` or `/cancel` to interrupt a session.
+Sessions are not persisted and are lost when the process restarts.
 
 ## Reply And Edit Helpers
 

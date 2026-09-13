@@ -6,6 +6,7 @@ package gogram
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -60,9 +61,22 @@ const (
 
 // Context carries one update to its handler.
 type Context struct {
-	Bot    *Bot
-	Api    *Api
-	Update *Update
+	Bot     *Bot
+	Api     *Api
+	Update  *Update
+	Session *Session
+}
+
+// SessionKey identifies a session for one user in one chat.
+type SessionKey struct {
+	UserID int64
+	ChatID int64
+}
+
+// Session is the active state and its server-side data.
+type Session struct {
+	Name string
+	Data any
 }
 
 // ErrNoReplyChat is returned by Reply when the update has no source message.
@@ -75,6 +89,106 @@ var ErrUnsupportedReplyMedia = errors.New("gogram: unsupported reply media")
 // ErrNoEditMessage is returned by edit helpers when the update has no message
 // that can be edited.
 var ErrNoEditMessage = errors.New("gogram: update has no editable message")
+
+// ErrNoSessionKey is returned when an update has no message sender and chat
+// from which a session key can be created.
+var ErrNoSessionKey = errors.New("gogram: update has no session key")
+
+// ErrNoSessionBot is returned when session helpers are called without a bot.
+var ErrNoSessionBot = errors.New("gogram: context has no bot")
+
+// ErrNoActiveSession is returned by SessionEdit when the current user and chat
+// have no active session.
+var ErrNoActiveSession = errors.New("gogram: no active session")
+
+// SessionKey returns the key for the user and chat that sent the update.
+func (c *Context) SessionKey() (SessionKey, error) {
+	if c == nil || c.Update == nil || c.Update.Message == nil || c.Update.Message.From == nil {
+		return SessionKey{}, ErrNoSessionKey
+	}
+	return SessionKey{UserID: c.Update.Message.From.ID, ChatID: c.Update.Message.Chat.ID}, nil
+}
+
+// StartSession activates name and optional data for the user and chat of the
+// current message. Subsequent messages without a registered command handler
+// for that key are routed to its Session handler.
+func (c *Context) StartSession(name string, data ...any) error {
+	if c == nil || c.Bot == nil {
+		return ErrNoSessionBot
+	}
+	key, err := c.SessionKey()
+	if err != nil {
+		return err
+	}
+	var sessionData any
+	if len(data) > 0 {
+		sessionData = data[0]
+	}
+	c.Bot.mu.Lock()
+	c.Bot.sessions[key] = Session{Name: name, Data: sessionData}
+	c.Bot.mu.Unlock()
+	return nil
+}
+
+// SessionEdit replaces the data of the active session for the current user
+// and chat while preserving its name.
+func (c *Context) SessionEdit(data any) error {
+	if c == nil || c.Bot == nil {
+		return ErrNoSessionBot
+	}
+	key, err := c.SessionKey()
+	if err != nil {
+		return err
+	}
+	c.Bot.mu.Lock()
+	session, ok := c.Bot.sessions[key]
+	if ok {
+		session.Data = data
+		c.Bot.sessions[key] = session
+	}
+	c.Bot.mu.Unlock()
+	if !ok {
+		return ErrNoActiveSession
+	}
+	if c.Session != nil {
+		c.Session.Data = data
+	}
+	return nil
+}
+
+// SessionData returns the value stored under key in the active session data.
+// Session data must be a map with string keys; it returns false when there is
+// no active session, the data has another type, or the key is absent.
+func (c *Context) SessionData(key string) (any, bool) {
+	if c == nil || c.Session == nil {
+		return nil, false
+	}
+	data := reflect.ValueOf(c.Session.Data)
+	if !data.IsValid() || data.Kind() != reflect.Map || data.Type().Key().Kind() != reflect.String {
+		return nil, false
+	}
+	value := data.MapIndex(reflect.ValueOf(key).Convert(data.Type().Key()))
+	if !value.IsValid() {
+		return nil, false
+	}
+	return value.Interface(), true
+}
+
+// EndSession removes the active session for the user and chat of the current
+// message.
+func (c *Context) EndSession() error {
+	if c == nil || c.Bot == nil {
+		return ErrNoSessionBot
+	}
+	key, err := c.SessionKey()
+	if err != nil {
+		return err
+	}
+	c.Bot.mu.Lock()
+	delete(c.Bot.sessions, key)
+	c.Bot.mu.Unlock()
+	return nil
+}
 
 // Reply sends text to the chat containing the incoming message or callback.
 // An optional SendMessageParams supplies send options such as ReplyMarkup;
@@ -318,6 +432,8 @@ type Bot struct {
 	commands  map[string]Handler
 	callbacks map[string]Handler
 	handlers  map[UpdateType]Handler
+	sessions  map[SessionKey]Session
+	states    map[string]Handler
 	username  string
 }
 
@@ -330,6 +446,8 @@ func NewBot(token string) *Bot {
 		commands:  make(map[string]Handler),
 		callbacks: make(map[string]Handler),
 		handlers:  make(map[UpdateType]Handler),
+		sessions:  make(map[SessionKey]Session),
+		states:    make(map[string]Handler),
 	}
 }
 
@@ -375,6 +493,19 @@ func (b *Bot) On(updateType UpdateType, handler Handler) {
 // OnMessage registers handler for message updates.
 func (b *Bot) OnMessage(handler Handler) {
 	b.On(UpdateMessage, handler)
+}
+
+// Session registers handler for an active session name. Registration replaces
+// any previous handler; a nil handler removes it. Active sessions are kept
+// until their context calls EndSession or starts another session.
+func (b *Bot) Session(name string, handler Handler) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if handler == nil {
+		delete(b.states, name)
+		return
+	}
+	b.states[name] = handler
 }
 
 // Use registers composer as the message handler, replacing any previous
@@ -477,24 +608,49 @@ func (b *Bot) callbackHandler(q *api.CallbackQuery) Handler {
 	return b.callbacks[*q.Data]
 }
 
+// sessionHandler returns the active session and its handler for a message.
+// Messages without a sender, such as channel posts, have no session.
+func (b *Bot) sessionHandler(msg *api.Message) (Handler, *Session) {
+	if msg == nil || msg.From == nil {
+		return nil, nil
+	}
+	key := SessionKey{UserID: msg.From.ID, ChatID: msg.Chat.ID}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	session, ok := b.sessions[key]
+	if !ok {
+		return nil, nil
+	}
+	return b.states[session.Name], &session
+}
+
 // handlerFor selects the handler for u: for a message update, a registered
-// command handler wins over the message handler; a non-command message, a
-// command without a registered handler, and all other update types use the
-// update-type handler.
-func (b *Bot) handlerFor(u *api.Update, typ UpdateType) Handler {
+// command handler wins, followed by an active session handler, then the
+// message handler. A command without a registered handler can therefore be
+// handled by an active session. All other update types use their update-type
+// handler.
+func (b *Bot) handlerFor(u *api.Update, typ UpdateType) (Handler, *Session) {
 	if typ == UpdateMessage {
+		sessionHandler, session := b.sessionHandler(u.Message)
 		if h := b.commandHandler(u.Message); h != nil {
-			return h
+			return h, session
 		}
+		if sessionHandler != nil {
+			return sessionHandler, session
+		}
+		b.mu.RLock()
+		h := b.handlers[typ]
+		b.mu.RUnlock()
+		return h, session
 	}
 	if typ == UpdateCallbackQuery {
 		if h := b.callbackHandler(u.CallbackQuery); h != nil {
-			return h
+			return h, nil
 		}
 	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.handlers[typ]
+	return b.handlers[typ], nil
 }
 
 // dispatch runs the handler selected for u, if any. Updates without a
@@ -504,11 +660,11 @@ func (b *Bot) dispatch(u *api.Update) error {
 	if typ == "" {
 		return nil
 	}
-	h := b.handlerFor(u, typ)
+	h, session := b.handlerFor(u, typ)
 	if h == nil {
 		return nil
 	}
-	return h(&Context{Bot: b, Api: b.Api, Update: u})
+	return h(&Context{Bot: b, Api: b.Api, Update: u, Session: session})
 }
 
 const (
