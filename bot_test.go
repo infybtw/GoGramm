@@ -200,6 +200,86 @@ func TestCommandRouting(t *testing.T) {
 	}
 }
 
+func TestSessionRouting(t *testing.T) {
+	message := func(userID, chatID int64, text string) *api.Update {
+		return &api.Update{Message: &api.Message{
+			From: &api.User{ID: userID}, Chat: api.Chat{ID: chatID}, Text: &text,
+		}}
+	}
+	b := NewBot("TESTTOKEN")
+	start, state, fallback := &recorder{}, &recorder{}, &recorder{}
+	b.Command("start", func(c *Context) error {
+		start.handle(c)
+		return c.StartSession("StartMessage")
+	})
+	b.Session("StartMessage", state.handle)
+	b.OnMessage(fallback.handle)
+
+	if err := b.dispatch(message(1, 10, "/start")); err != nil {
+		t.Fatalf("dispatch start: %v", err)
+	}
+	if err := b.dispatch(message(1, 10, "answer")); err != nil {
+		t.Fatalf("dispatch session message: %v", err)
+	}
+	if err := b.dispatch(message(2, 10, "other user")); err != nil {
+		t.Fatalf("dispatch other user message: %v", err)
+	}
+	if start.count() != 1 || state.count() != 1 || fallback.count() != 1 {
+		t.Fatalf("start, state, fallback = %d, %d, %d calls, want 1, 1, 1", start.count(), state.count(), fallback.count())
+	}
+	if got := state.last().Session; got != "StartMessage" {
+		t.Errorf("session = %q, want StartMessage", got)
+	}
+	key, err := state.last().SessionKey()
+	if err != nil {
+		t.Fatalf("SessionKey: %v", err)
+	}
+	if key != (SessionKey{UserID: 1, ChatID: 10}) {
+		t.Errorf("SessionKey = %+v, want {UserID:1 ChatID:10}", key)
+	}
+}
+
+func TestSessionEndAndCommandPrecedence(t *testing.T) {
+	message := func(text string) *api.Update {
+		return &api.Update{Message: &api.Message{
+			From: &api.User{ID: 1}, Chat: api.Chat{ID: 10}, Text: &text,
+		}}
+	}
+	b := NewBot("TESTTOKEN")
+	command, state, fallback := &recorder{}, &recorder{}, &recorder{}
+	b.Command("cancel", command.handle)
+	b.Session("StartMessage", func(c *Context) error {
+		state.handle(c)
+		return c.EndSession()
+	})
+	b.OnMessage(fallback.handle)
+	if err := b.dispatch(message("seed")); err != nil {
+		t.Fatalf("dispatch seed: %v", err)
+	}
+	if err := (&Context{Bot: b, Update: message("seed")}).StartSession("StartMessage"); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := b.dispatch(message("/cancel")); err != nil {
+		t.Fatalf("dispatch command: %v", err)
+	}
+	if err := b.dispatch(message("answer")); err != nil {
+		t.Fatalf("dispatch session message: %v", err)
+	}
+	if err := b.dispatch(message("after end")); err != nil {
+		t.Fatalf("dispatch after end: %v", err)
+	}
+	if command.count() != 1 || state.count() != 1 || fallback.count() != 2 {
+		t.Errorf("command, state, fallback = %d, %d, %d calls, want 1, 1, 2", command.count(), state.count(), fallback.count())
+	}
+}
+
+func TestSessionKeyRequiresMessageSender(t *testing.T) {
+	c := &Context{Bot: NewBot("TESTTOKEN"), Update: &api.Update{Message: &api.Message{}}}
+	if err := c.StartSession("StartMessage"); !errors.Is(err, ErrNoSessionKey) {
+		t.Errorf("StartSession error = %v, want ErrNoSessionKey", err)
+	}
+}
+
 func TestCallbackQueryRouting(t *testing.T) {
 	callbackUpdate := func(data *string) *api.Update {
 		return &api.Update{UpdateID: 1, CallbackQuery: &api.CallbackQuery{Data: data}}

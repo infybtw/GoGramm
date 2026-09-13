@@ -124,6 +124,32 @@ bot.Use(admin)
 addressed to another bot. Registering the same command or callback again
 replaces its handler; passing `nil` removes it.
 
+## Sessions
+
+Sessions are server-side state held in memory by `Bot`. They are keyed by both
+the sender's user ID and chat ID, so different users in a group have separate
+sessions. Register a session handler and activate it from a command; active
+sessions receive subsequent messages without a registered command handler
+before `OnMessage`:
+
+```go
+bot.Session("StartMessage", func(update *gogram.Context) error {
+	defer update.EndSession()
+	return update.Reply("Your next message was: " + *update.Update.Message.Text)
+})
+
+bot.Command("start", func(update *gogram.Context) error {
+	if err := update.StartSession("StartMessage"); err != nil {
+		return err
+	}
+	return update.Reply("Send one message.")
+})
+```
+
+`Context.EndSession` ends the active session. Registered commands still take
+precedence, allowing commands such as `/start` or `/cancel` to interrupt a
+session. Sessions are not persisted and are lost when the process restarts.
+
 ## Reply And Edit Helpers
 
 Handlers receive `*gogram.Context`, which exposes the bot, low-level API
