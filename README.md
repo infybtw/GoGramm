@@ -4,6 +4,16 @@ GoGramm is a typed Go client for the Telegram Bot API. It includes a small,
 long-polling dispatcher with command routing, callback-query handlers,
 composable command groups, keyboards, and helpers for responding to an update.
 
+## Contents
+
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Routing](#routing)
+- [Reply And Edit Helpers](#reply-and-edit-helpers)
+- [Buttons](#buttons)
+- [Low-Level API](#low-level-api)
+- [License](#license)
+
 ## Install
 
 GoGramm requires Go 1.27 or later.
