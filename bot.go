@@ -70,6 +70,10 @@ type Context struct {
 // ErrNoReplyChat is returned by Reply when the update has no source message.
 var ErrNoReplyChat = errors.New("gogram: update has no source message")
 
+// ErrUnsupportedReplyMedia is returned by ReplyWithMedia for a media type that
+// cannot be sent by a single Telegram Bot API method.
+var ErrUnsupportedReplyMedia = errors.New("gogram: unsupported reply media")
+
 // ErrNoEditMessage is returned by edit helpers when the update has no message
 // that can be edited.
 var ErrNoEditMessage = errors.New("gogram: update has no editable message")
@@ -79,30 +83,9 @@ var ErrNoEditMessage = errors.New("gogram: update has no editable message")
 // its ChatID and Text fields are ignored. It does not create a Telegram
 // message reply; set ReplyParameters in the options when that is required.
 func (c *Context) Reply(text string, options ...*api.SendMessageParams) error {
-	if c == nil || c.Update == nil {
-		return ErrNoReplyChat
-	}
-	var chatID int64
-	switch {
-	case c.Update.Message != nil:
-		chatID = c.Update.Message.Chat.ID
-	case c.Update.CallbackQuery != nil:
-		switch message := c.Update.CallbackQuery.Message.(type) {
-		case *api.Message:
-			if message == nil {
-				return ErrNoReplyChat
-			}
-			chatID = message.Chat.ID
-		case *api.InaccessibleMessage:
-			if message == nil {
-				return ErrNoReplyChat
-			}
-			chatID = message.Chat.ID
-		default:
-			return ErrNoReplyChat
-		}
-	default:
-		return ErrNoReplyChat
+	chatID, err := c.replyChatID()
+	if err != nil {
+		return err
 	}
 	p := &api.SendMessageParams{}
 	if len(options) > 0 && options[0] != nil {
@@ -110,8 +93,104 @@ func (c *Context) Reply(text string, options ...*api.SendMessageParams) error {
 	}
 	p.ChatID = api.NewChatID(chatID)
 	p.Text = text
-	_, err := c.Api.SendMessage(context.Background(), p)
+	_, err = c.Api.SendMessage(context.Background(), p)
 	return err
+}
+
+func (c *Context) replyChatID() (int64, error) {
+	if c == nil || c.Update == nil {
+		return 0, ErrNoReplyChat
+	}
+	if c.Update.Message != nil {
+		return c.Update.Message.Chat.ID, nil
+	}
+	if query := c.Update.CallbackQuery; query != nil {
+		switch message := query.Message.(type) {
+		case *api.Message:
+			if message != nil {
+				return message.Chat.ID, nil
+			}
+		case *api.InaccessibleMessage:
+			if message != nil {
+				return message.Chat.ID, nil
+			}
+		}
+	}
+	return 0, ErrNoReplyChat
+}
+
+// ReplyWithMedia sends media to the chat containing the incoming message or
+// callback. Set Caption on media to include a caption with the reply.
+func (c *Context) ReplyWithMedia(media api.InputMedia) error {
+	chatID, err := c.replyChatID()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	switch media := media.(type) {
+	case *api.InputMediaPhoto:
+		_, err = c.Api.SendPhoto(ctx, &api.SendPhotoParams{
+			ChatID: api.NewChatID(chatID), Photo: media.Media, Caption: media.Caption,
+			ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities),
+			ShowCaptionAboveMedia: media.ShowCaptionAboveMedia, HasSpoiler: media.HasSpoiler,
+		})
+	case *api.InputMediaVideo:
+		_, err = c.Api.SendVideo(ctx, &api.SendVideoParams{
+			ChatID: api.NewChatID(chatID), Video: media.Media, Duration: media.Duration,
+			Width: media.Width, Height: media.Height, Thumbnail: media.Thumbnail, Cover: media.Cover,
+			StartTimestamp: replyMediaStartTimestamp(media.StartTimestamp), Caption: media.Caption, ParseMode: media.ParseMode,
+			CaptionEntities: replyMediaEntities(media.CaptionEntities), ShowCaptionAboveMedia: media.ShowCaptionAboveMedia,
+			HasSpoiler: media.HasSpoiler, SupportsStreaming: media.SupportsStreaming,
+		})
+	case *api.InputMediaAudio:
+		_, err = c.Api.SendAudio(ctx, &api.SendAudioParams{
+			ChatID: api.NewChatID(chatID), Audio: media.Media, Thumbnail: media.Thumbnail,
+			Caption: media.Caption, ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities),
+			Duration: media.Duration, Performer: media.Performer, Title: media.Title,
+		})
+	case *api.InputMediaDocument:
+		_, err = c.Api.SendDocument(ctx, &api.SendDocumentParams{
+			ChatID: api.NewChatID(chatID), Document: media.Media, Thumbnail: media.Thumbnail,
+			Caption: media.Caption, ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities),
+			DisableContentTypeDetection: media.DisableContentTypeDetection,
+		})
+	case *api.InputMediaAnimation:
+		_, err = c.Api.SendAnimation(ctx, &api.SendAnimationParams{
+			ChatID: api.NewChatID(chatID), Animation: media.Media, Thumbnail: media.Thumbnail,
+			Caption: media.Caption, ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities),
+			ShowCaptionAboveMedia: media.ShowCaptionAboveMedia, Duration: media.Duration,
+			Width: media.Width, Height: media.Height, HasSpoiler: media.HasSpoiler,
+		})
+	case *api.InputMediaLivePhoto:
+		_, err = c.Api.SendLivePhoto(ctx, &api.SendLivePhotoParams{
+			ChatID: api.NewChatID(chatID), LivePhoto: media.Media, Photo: media.Photo,
+			Caption: media.Caption, ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities),
+			ShowCaptionAboveMedia: media.ShowCaptionAboveMedia, HasSpoiler: media.HasSpoiler,
+		})
+	case *api.InputMediaVoiceNote:
+		_, err = c.Api.SendVoice(ctx, &api.SendVoiceParams{
+			ChatID: api.NewChatID(chatID), Voice: media.Media, Caption: media.Caption,
+			ParseMode: media.ParseMode, CaptionEntities: replyMediaEntities(media.CaptionEntities), Duration: media.Duration,
+		})
+	default:
+		return ErrUnsupportedReplyMedia
+	}
+	return err
+}
+
+func replyMediaEntities(entities []api.MessageEntity) *[]api.MessageEntity {
+	if len(entities) == 0 {
+		return nil
+	}
+	return &entities
+}
+
+func replyMediaStartTimestamp(timestamp *int) *int64 {
+	if timestamp == nil {
+		return nil
+	}
+	value := int64(*timestamp)
+	return &value
 }
 
 type editMessageTarget struct {

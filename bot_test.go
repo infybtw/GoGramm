@@ -392,6 +392,44 @@ func TestContextReplyToCallbackQuery(t *testing.T) {
 	}
 }
 
+func TestContextReplyWithMedia(t *testing.T) {
+	var got struct {
+		ChatID  int64  `json:"chat_id"`
+		Photo   string `json:"photo"`
+		Caption string `json:"caption"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTESTTOKEN/sendPhoto" {
+			t.Errorf("request path = %q, want sendPhoto", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":2,"date":1,"chat":{"id":42,"type":"private"}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newTestBot(t, srv)
+	c := &Context{Api: b.Api, Update: &api.Update{Message: &api.Message{Chat: api.Chat{ID: 42}}}}
+	caption := "Same photo"
+	if err := c.ReplyWithMedia(&api.InputMediaPhoto{
+		Media:   api.FileID("photo-id"),
+		Caption: &caption,
+	}); err != nil {
+		t.Fatalf("ReplyWithMedia: %v", err)
+	}
+	if got.ChatID != 42 || got.Photo != "photo-id" || got.Caption != "Same photo" {
+		t.Errorf("sendPhoto params = %+v", got)
+	}
+}
+
+func TestContextReplyWithUnsupportedMedia(t *testing.T) {
+	c := &Context{Update: &api.Update{Message: &api.Message{}}}
+	if err := c.ReplyWithMedia(&api.InputMediaLocation{}); !errors.Is(err, ErrUnsupportedReplyMedia) {
+		t.Errorf("ReplyWithMedia error = %v, want ErrUnsupportedReplyMedia", err)
+	}
+}
+
 func TestContextEditMessageText(t *testing.T) {
 	var got struct {
 		ChatID    int64  `json:"chat_id"`
