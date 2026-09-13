@@ -6,6 +6,7 @@ package gogram
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -63,13 +64,19 @@ type Context struct {
 	Bot     *Bot
 	Api     *Api
 	Update  *Update
-	Session string
+	Session *Session
 }
 
 // SessionKey identifies a session for one user in one chat.
 type SessionKey struct {
 	UserID int64
 	ChatID int64
+}
+
+// Session is the active state and its server-side data.
+type Session struct {
+	Name string
+	Data any
 }
 
 // ErrNoReplyChat is returned by Reply when the update has no source message.
@@ -90,6 +97,10 @@ var ErrNoSessionKey = errors.New("gogram: update has no session key")
 // ErrNoSessionBot is returned when session helpers are called without a bot.
 var ErrNoSessionBot = errors.New("gogram: context has no bot")
 
+// ErrNoActiveSession is returned by SessionEdit when the current user and chat
+// have no active session.
+var ErrNoActiveSession = errors.New("gogram: no active session")
+
 // SessionKey returns the key for the user and chat that sent the update.
 func (c *Context) SessionKey() (SessionKey, error) {
 	if c == nil || c.Update == nil || c.Update.Message == nil || c.Update.Message.From == nil {
@@ -98,10 +109,30 @@ func (c *Context) SessionKey() (SessionKey, error) {
 	return SessionKey{UserID: c.Update.Message.From.ID, ChatID: c.Update.Message.Chat.ID}, nil
 }
 
-// StartSession activates name for the user and chat of the current message.
-// Subsequent messages without a registered command handler for that key are
-// routed to its Session handler.
-func (c *Context) StartSession(name string) error {
+// StartSession activates name and optional data for the user and chat of the
+// current message. Subsequent messages without a registered command handler
+// for that key are routed to its Session handler.
+func (c *Context) StartSession(name string, data ...any) error {
+	if c == nil || c.Bot == nil {
+		return ErrNoSessionBot
+	}
+	key, err := c.SessionKey()
+	if err != nil {
+		return err
+	}
+	var sessionData any
+	if len(data) > 0 {
+		sessionData = data[0]
+	}
+	c.Bot.mu.Lock()
+	c.Bot.sessions[key] = Session{Name: name, Data: sessionData}
+	c.Bot.mu.Unlock()
+	return nil
+}
+
+// SessionEdit replaces the data of the active session for the current user
+// and chat while preserving its name.
+func (c *Context) SessionEdit(data any) error {
 	if c == nil || c.Bot == nil {
 		return ErrNoSessionBot
 	}
@@ -110,9 +141,37 @@ func (c *Context) StartSession(name string) error {
 		return err
 	}
 	c.Bot.mu.Lock()
-	c.Bot.sessions[key] = name
+	session, ok := c.Bot.sessions[key]
+	if ok {
+		session.Data = data
+		c.Bot.sessions[key] = session
+	}
 	c.Bot.mu.Unlock()
+	if !ok {
+		return ErrNoActiveSession
+	}
+	if c.Session != nil {
+		c.Session.Data = data
+	}
 	return nil
+}
+
+// SessionData returns the value stored under key in the active session data.
+// Session data must be a map with string keys; it returns false when there is
+// no active session, the data has another type, or the key is absent.
+func (c *Context) SessionData(key string) (any, bool) {
+	if c == nil || c.Session == nil {
+		return nil, false
+	}
+	data := reflect.ValueOf(c.Session.Data)
+	if !data.IsValid() || data.Kind() != reflect.Map || data.Type().Key().Kind() != reflect.String {
+		return nil, false
+	}
+	value := data.MapIndex(reflect.ValueOf(key).Convert(data.Type().Key()))
+	if !value.IsValid() {
+		return nil, false
+	}
+	return value.Interface(), true
 }
 
 // EndSession removes the active session for the user and chat of the current
@@ -373,7 +432,7 @@ type Bot struct {
 	commands  map[string]Handler
 	callbacks map[string]Handler
 	handlers  map[UpdateType]Handler
-	sessions  map[SessionKey]string
+	sessions  map[SessionKey]Session
 	states    map[string]Handler
 	username  string
 }
@@ -387,7 +446,7 @@ func NewBot(token string) *Bot {
 		commands:  make(map[string]Handler),
 		callbacks: make(map[string]Handler),
 		handlers:  make(map[UpdateType]Handler),
-		sessions:  make(map[SessionKey]string),
+		sessions:  make(map[SessionKey]Session),
 		states:    make(map[string]Handler),
 	}
 }
@@ -549,17 +608,20 @@ func (b *Bot) callbackHandler(q *api.CallbackQuery) Handler {
 	return b.callbacks[*q.Data]
 }
 
-// sessionHandler returns the active session handler for a message and its
-// name. Messages without a sender, such as channel posts, have no session.
-func (b *Bot) sessionHandler(msg *api.Message) (Handler, string) {
+// sessionHandler returns the active session and its handler for a message.
+// Messages without a sender, such as channel posts, have no session.
+func (b *Bot) sessionHandler(msg *api.Message) (Handler, *Session) {
 	if msg == nil || msg.From == nil {
-		return nil, ""
+		return nil, nil
 	}
 	key := SessionKey{UserID: msg.From.ID, ChatID: msg.Chat.ID}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	name := b.sessions[key]
-	return b.states[name], name
+	session, ok := b.sessions[key]
+	if !ok {
+		return nil, nil
+	}
+	return b.states[session.Name], &session
 }
 
 // handlerFor selects the handler for u: for a message update, a registered
@@ -567,23 +629,28 @@ func (b *Bot) sessionHandler(msg *api.Message) (Handler, string) {
 // message handler. A command without a registered handler can therefore be
 // handled by an active session. All other update types use their update-type
 // handler.
-func (b *Bot) handlerFor(u *api.Update, typ UpdateType) (Handler, string) {
+func (b *Bot) handlerFor(u *api.Update, typ UpdateType) (Handler, *Session) {
 	if typ == UpdateMessage {
+		sessionHandler, session := b.sessionHandler(u.Message)
 		if h := b.commandHandler(u.Message); h != nil {
-			return h, ""
-		}
-		if h, session := b.sessionHandler(u.Message); h != nil {
 			return h, session
 		}
+		if sessionHandler != nil {
+			return sessionHandler, session
+		}
+		b.mu.RLock()
+		h := b.handlers[typ]
+		b.mu.RUnlock()
+		return h, session
 	}
 	if typ == UpdateCallbackQuery {
 		if h := b.callbackHandler(u.CallbackQuery); h != nil {
-			return h, ""
+			return h, nil
 		}
 	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.handlers[typ], ""
+	return b.handlers[typ], nil
 }
 
 // dispatch runs the handler selected for u, if any. Updates without a

@@ -40,6 +40,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -135,20 +136,27 @@ before `OnMessage`:
 ```go
 bot.Session("StartMessage", func(update *gogram.Context) error {
 	defer update.EndSession()
-	return update.Reply("Your next message was: " + *update.Update.Message.Text)
+	id, ok := update.SessionData("id")
+	if !ok {
+		return update.Reply("Missing request ID.")
+	}
+	return update.Reply(fmt.Sprintf("Request %d: %s", id, *update.Update.Message.Text))
 })
 
 bot.Command("start", func(update *gogram.Context) error {
-	if err := update.StartSession("StartMessage"); err != nil {
+	if err := update.StartSession("StartMessage", map[string]int{"id": 1}); err != nil {
 		return err
 	}
 	return update.Reply("Send one message.")
 })
 ```
 
-`Context.EndSession` ends the active session. Registered commands still take
-precedence, allowing commands such as `/start` or `/cancel` to interrupt a
-session. Sessions are not persisted and are lost when the process restarts.
+`Context.SessionData(key)` reads values from session data maps with string
+keys, such as `map[string]int` and `map[string]any`. Use
+`Context.SessionEdit(data)` to replace an active session's data and
+`Context.EndSession` to end it. Registered commands still take precedence,
+allowing commands such as `/start` or `/cancel` to interrupt a session.
+Sessions are not persisted and are lost when the process restarts.
 
 ## Reply And Edit Helpers
 

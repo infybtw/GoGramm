@@ -210,7 +210,7 @@ func TestSessionRouting(t *testing.T) {
 	start, state, fallback := &recorder{}, &recorder{}, &recorder{}
 	b.Command("start", func(c *Context) error {
 		start.handle(c)
-		return c.StartSession("StartMessage")
+		return c.StartSession("StartMessage", map[string]int{"id": 1})
 	})
 	b.Session("StartMessage", state.handle)
 	b.OnMessage(fallback.handle)
@@ -227,8 +227,14 @@ func TestSessionRouting(t *testing.T) {
 	if start.count() != 1 || state.count() != 1 || fallback.count() != 1 {
 		t.Fatalf("start, state, fallback = %d, %d, %d calls, want 1, 1, 1", start.count(), state.count(), fallback.count())
 	}
-	if got := state.last().Session; got != "StartMessage" {
-		t.Errorf("session = %q, want StartMessage", got)
+	if got := state.last().Session; got == nil || got.Name != "StartMessage" {
+		t.Errorf("session = %+v, want StartMessage", got)
+	} else if data, ok := got.Data.(map[string]int); !ok || data["id"] != 1 {
+		t.Errorf("session data = %#v, want map[id:1]", got.Data)
+	}
+	id, ok := state.last().SessionData("id")
+	if !ok || id != 1 {
+		t.Errorf("SessionData(id) = %#v, %v; want 1, true", id, ok)
 	}
 	key, err := state.last().SessionKey()
 	if err != nil {
@@ -256,7 +262,7 @@ func TestSessionEndAndCommandPrecedence(t *testing.T) {
 	if err := b.dispatch(message("seed")); err != nil {
 		t.Fatalf("dispatch seed: %v", err)
 	}
-	if err := (&Context{Bot: b, Update: message("seed")}).StartSession("StartMessage"); err != nil {
+	if err := (&Context{Bot: b, Update: message("seed")}).StartSession("StartMessage", nil); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	if err := b.dispatch(message("/cancel")); err != nil {
@@ -275,8 +281,43 @@ func TestSessionEndAndCommandPrecedence(t *testing.T) {
 
 func TestSessionKeyRequiresMessageSender(t *testing.T) {
 	c := &Context{Bot: NewBot("TESTTOKEN"), Update: &api.Update{Message: &api.Message{}}}
-	if err := c.StartSession("StartMessage"); !errors.Is(err, ErrNoSessionKey) {
+	if err := c.StartSession("StartMessage", nil); !errors.Is(err, ErrNoSessionKey) {
 		t.Errorf("StartSession error = %v, want ErrNoSessionKey", err)
+	}
+}
+
+func TestSessionEdit(t *testing.T) {
+	message := func(text string) *api.Update {
+		return &api.Update{Message: &api.Message{
+			From: &api.User{ID: 1}, Chat: api.Chat{ID: 10}, Text: &text,
+		}}
+	}
+	b := NewBot("TESTTOKEN")
+	var data []int
+	b.Session("StartMessage", func(c *Context) error {
+		data = append(data, c.Session.Data.(int))
+		if c.Session.Data.(int) == 1 {
+			return c.SessionEdit(2)
+		}
+		return nil
+	})
+	if err := (&Context{Bot: b, Update: message("seed")}).StartSession("StartMessage", 1); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := b.dispatch(message("first")); err != nil {
+		t.Fatalf("dispatch first: %v", err)
+	}
+	if err := b.dispatch(message("second")); err != nil {
+		t.Fatalf("dispatch second: %v", err)
+	}
+	if !reflect.DeepEqual(data, []int{1, 2}) {
+		t.Errorf("session data = %v, want [1 2]", data)
+	}
+	if err := (&Context{Bot: b, Update: message("seed")}).EndSession(); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if err := (&Context{Bot: b, Update: message("seed")}).SessionEdit(3); !errors.Is(err, ErrNoActiveSession) {
+		t.Errorf("SessionEdit error = %v, want ErrNoActiveSession", err)
 	}
 }
 
