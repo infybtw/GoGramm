@@ -6,10 +6,8 @@ package gogram
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/infybtw/GoGramm/api"
 )
@@ -379,6 +377,17 @@ func (b *Bot) OnMessage(handler Handler) {
 	b.On(UpdateMessage, handler)
 }
 
+// Use registers composer as the message handler, replacing any previous
+// message handler. Commands registered directly on the Bot still take
+// precedence over the composer.
+func (b *Bot) Use(composer *Composer) {
+	if composer == nil {
+		b.OnMessage(nil)
+		return
+	}
+	b.OnMessage(composer.Handle)
+}
+
 // classify reports which optional api.Update field u carries, inspecting
 // members in declaration order. It returns "" when none is set.
 func classify(u *api.Update) UpdateType {
@@ -448,26 +457,12 @@ func classify(u *api.Update) UpdateType {
 // the message handler. Returns nil when the message is not a command with a
 // registered handler.
 func (b *Bot) commandHandler(msg *api.Message) Handler {
-	if msg == nil || msg.Text == nil {
+	command, ok := commandName(msg, botUsername(b))
+	if !ok {
 		return nil
 	}
-	text := *msg.Text
-	if !strings.HasPrefix(text, "/") {
-		return nil
-	}
-	token := text
-	if i := strings.IndexFunc(text, unicode.IsSpace); i >= 0 {
-		token = text[:i]
-	}
-	command := strings.TrimPrefix(token, "/")
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if name, target, ok := strings.Cut(command, "@"); ok {
-		if b.username == "" || !strings.EqualFold(target, b.username) {
-			return nil
-		}
-		command = name
-	}
 	return b.commands[command]
 }
 
